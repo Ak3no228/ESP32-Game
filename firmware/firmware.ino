@@ -88,6 +88,14 @@ GButton LEFT_BUTTON(LEFT_BUTTON_PIN), RIGHT_BUTTON(RIGHT_BUTTON_PIN), UP_BUTTON(
         DOWN_BUTTON(DOWN_BUTTON_PIN), CENTRAL_BUTTON(CENTRAL_BUTTON_PIN);
         
 
+void setBright(uint16_t value);
+void updateBatery();
+void updateMenu();
+void updateNotes();
+void loopMenu();
+void processMANIA();
+void precessGAMEPAD();
+
 void setup() {
   Serial.begin(115200);
   
@@ -135,6 +143,7 @@ void loop() {
   {
     if (menu_position == MANIA) {
       processMANIA();
+    }
     else if (menu_position == GAMEPAD) {
       precessGAMEPAD();
     }
@@ -410,7 +419,7 @@ void processMANIA()
 
 void updateNotes()
 {
-    String fullPath = "/DJ_OKAWARI_Flower_Dance/map.txt";
+    String fullPath = "/maps/THE_ORAL_CIGARETTES_Kyouran_Hey_Kids!!/map.txt";
     File file = SD.open(fullPath.c_str());
     if (!file) {
       Serial.println("Файл не найден: " + fullPath);
