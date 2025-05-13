@@ -1,16 +1,23 @@
-//hardware
+#include <Wire.h>
+#include <EEPROM.h>
+#include <Adafruit_SSD1306.h>
+#include <GyverButton.h> 
+#include <esp_sleep.h>
+#include "bitmaps.h"
+#include <SD.h>
+
+
+// hardware
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define SCREEN_UPDATE_DELAY 17 //80fps
-
 #define LEFT_BUTTON_PIN 26
 #define RIGHT_BUTTON_PIN 25
 #define UP_BUTTON_PIN 32
 #define DOWN_BUTTON_PIN 33
 #define CENTRAL_BUTTON_PIN 27
-
-//#define OLED_VCC_PIN 4
 #define BAT_VCC_PIN 35
+#define SD_PIN 5
 
 
 
@@ -39,12 +46,14 @@
 #define KEY_RADIUS 11
 #define KEY_X_POSITION 16
 #define NOTE_RADIUS 9
-#define FALL_SPEED 0.1
+#define FALL_SPEED 0.14f
 #define PERFECT_HIT_RANGE 1.0
 #define NORMAL_HIT_RANGE  2.8
 #define SPEED_UP_ON_FRAME 0.0004
 #define MAX_MISSES 5
 
+
+// game
 int8_t current_hitmark = -1;  // hitmark: (-1)->don't draw  (0)->miss  (1)->bad hit  (2)->nice hit
 unsigned long last_hitmark_time, lastFrameTime = 0;
 uint16_t combo = 0;
@@ -53,67 +62,37 @@ uint8_t miss_count = 0;
 double start_time = 0;
 
 struct Note {
-  bool type;             // 0->note, 1->slider
-  bool line;             // 0->left, 1->right
-  unsigned long time;    // in milliseconds
-  unsigned long end_time;// only for sliders
+  bool type;              // 0->note, 1->slider
+  bool line;              // 0->left, 1->right
+  unsigned long time;     // in milliseconds
+  unsigned long end_time; // only for sliders
   bool draw;
 };
-
 
 const int max_note_count = 1000;
 Note notes[max_note_count];
 int note_count = 0;
 
 
-// include
-#include <Wire.h>
-#include <EEPROM.h>
-#include <Adafruit_SSD1306.h>
-#include <GyverButton.h> 
-#include <esp_sleep.h>
-#include "bitmaps.h"
-#include <SD.h>
-
+// menu
+bool isMenu = true;
+int menu_position = 0;
+const char* MENU_ITEMS[] = {"MANIA", "GAMEPAD", "BT LINK", "SETTINGS"};
+const int NUM_MENU_ITEMS = sizeof(MENU_ITEMS) / sizeof(MENU_ITEMS[0]);
+const uint8_t MENU_ITEMS_OFFSETS[] = {34, 22, 22, 16};
+int percentage = -1;
+bool game_pad = false;
 
 
 // classes
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000, 400000);
 GButton LEFT_BUTTON(LEFT_BUTTON_PIN), RIGHT_BUTTON(RIGHT_BUTTON_PIN), UP_BUTTON(UP_BUTTON_PIN),
         DOWN_BUTTON(DOWN_BUTTON_PIN), CENTRAL_BUTTON(CENTRAL_BUTTON_PIN);
-//BNO080 myIMU;
-
-
-
-// globals
-bool isMenu = true;
-int menu_position = 0;
-//const char* MENU_ITEMS[] = {"MANIA", "SETTINGS", "GAMEPAD", "BLUETOOTH"}; 
-const char* MENU_ITEMS[] = {"MANIA", "GAMEPAD", "BT LINK", "SETTINGS"};
-const int NUM_MENU_ITEMS = sizeof(MENU_ITEMS) / sizeof(MENU_ITEMS[0]);
-//const uint8_t MENU_ITEMS_OFFSETS[] = {34, 16, 22, 16};
-const uint8_t MENU_ITEMS_OFFSETS[] = {34, 22, 22, 16};
-int percentage = -1;
-bool game_pad = false;
-
-
-
-// timers
-unsigned long last_press_keys = 0;
-unsigned long last_screen_update = 0;
-
-
-void IRAM_ATTR handleInterrupt() {
-  last_press_keys = millis();
-}
-
-
+        
 
 void setup() {
   Serial.begin(115200);
-  //pinMode(OLED_VCC_PIN, OUTPUT);
-  //digitalWrite(OLED_VCC_PIN, HIGH);
-
+  
   LEFT_BUTTON.setDebounce(20);
   RIGHT_BUTTON.setDebounce(20);
   UP_BUTTON.setDebounce(20);
@@ -133,9 +112,8 @@ void setup() {
   CENTRAL_BUTTON.setTickMode(AUTO);
 
   Wire.begin();
-
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    if (SERIAL_DEBUG) Serial.println("SSD1306 allocation failed");
+    Serial.println("SSD1306 allocation failed");
     while (1);
   }
   setBright(1);
@@ -145,44 +123,34 @@ void setup() {
   updateBatery();
   updateMenu();
 
-  Serial.println("Инициализация SD-карты...");
-  if (!SD.begin(5)) {
+  if (!SD.begin(SD_PIN)) {
     Serial.println("Ошибка SD-карты.");
-    return;
+    while (1);
   }
-  
-//  // note generator
-//  noteGenerator();
   updateNotes();
 }
 
 
 void loop() {
-  //unsigned long current_time = millis();
-//  if (current_time - last_press_keys > SLEEP_TIMEOUT) goToSleep();
-  
   if (isMenu) loopMenu();
   else
   {
-    if (menu_position == GAMEPAD) {
-      precessGAMEPAD();
-    }
-    else if (menu_position == MANIA) {
+    if (menu_position == MANIA) {
       processMANIA();
+    else if (menu_position == GAMEPAD) {
+      precessGAMEPAD();
     }
     else isMenu = true;
   }
 }
 
-void tickButtons(){
-  
-}
+
 void clearButtons() {
-  LEFT_BUTTON.resetStates();
-  RIGHT_BUTTON.resetStates();
-  UP_BUTTON.resetStates();
-  DOWN_BUTTON.resetStates();
-  CENTRAL_BUTTON.resetStates();
+    LEFT_BUTTON.resetStates();
+    RIGHT_BUTTON.resetStates();
+    UP_BUTTON.resetStates();
+    DOWN_BUTTON.resetStates();
+    CENTRAL_BUTTON.resetStates();
 }
 
 
@@ -195,6 +163,7 @@ void loopSubMenu() {
     updateMenu();
   }
 }
+
 
 void loopMenu() {
   if (CENTRAL_BUTTON.isClick()) {
@@ -237,11 +206,11 @@ void updateMenu() {
   display.display(); 
 }
 
+
 void updateBatery()
 {
   int raw = analogRead(BAT_VCC_PIN);
   float temp = (raw * 3.3 / 4095.0)/0.6897;
-  //Serial.println(temp);
   float voltage = temp;//(raw * 3.3 / 4095.0)* 3.427;
 
   if (voltage <= 4.2)
@@ -253,14 +222,11 @@ void updateBatery()
 }
 
 
-
-
 void setBright(uint16_t value)
 {
    display.ssd1306_command(SSD1306_SETCONTRAST);
    display.ssd1306_command(value);
 }
-
 
 
 void precessGAMEPAD(){
@@ -312,21 +278,21 @@ void precessGAMEPAD(){
 
 // mania
 void resetMania(bool win){
-      display.clearDisplay();
-      display.setRotation(1);
-      display.setTextSize(2);
-      display.setCursor(13, 25);
-      if (win) display.print("WIN");
-      else display.print("LOSE");
-      display.setRotation(0);
-      display.display();
-      while (!CENTRAL_BUTTON.isPress()) delay(1);
-      current_hitmark = -1;
-      combo = 0;
-      miss_count = 0; 
-      updateNotes();
-      start_time = millis();
-      //isMenu = true;
+  display.clearDisplay();
+  display.setRotation(1);
+  display.setTextSize(2);
+  display.setCursor(13, 25);
+  if (win) display.print("WIN");
+  else display.print("LOSE");
+  display.setRotation(0);
+  display.display();
+  while (!CENTRAL_BUTTON.isPress()) delay(1);
+  current_hitmark = -1;
+  combo = 0;
+  miss_count = 0; 
+  updateNotes();
+  start_time = millis();
+  //isMenu = true;
 }
 
 
@@ -350,11 +316,13 @@ void process_hit(uint8_t type)
   }
 }
 
+
 void draw_note(bool line, uint8_t x_position)
 {
   uint8_t y_pos = (line == 0) ? FIRST_LINE_Y : SECOND_LINE_Y;
   display.fillCircle(x_position, y_pos, NOTE_RADIUS, WHITE);
 }
+
 
 void draw_hitmark()
 {
@@ -377,10 +345,7 @@ void draw_hit_keys()
 void processMANIA()
 {
   unsigned long current_time = millis() - start_time;
-  if (millis() - lastFrameTime < FRAME_TIME)
-  {
-    return;
-  }
+  if (millis() - lastFrameTime < FRAME_TIME) return;
 
   if (RIGHT_BUTTON.isClick())
   {
@@ -393,12 +358,12 @@ void processMANIA()
     return;
   }  
   display.clearDisplay();
+  
   bool left_pressed = UP_BUTTON.isPress();
   bool right_pressed = DOWN_BUTTON.isPress();
   
   for (int i = 0; i < note_count; i++) {
      Note &n = notes[i];
-
      if (n.draw==false) continue;
 
      float x_pos = (((long)n.time - (long)current_time) * fall_speed) + KEY_X_POSITION;
@@ -453,7 +418,7 @@ void updateNotes()
       Serial.println("Файл не найден: " + fullPath);
       return;
     }
-    while (file.available() && note_count <= 80) {
+    while (file.available() && note_count <= 1000) {
       String line = file.readStringUntil('\n');
       line.trim();
       if (line.length() == 0) continue;
