@@ -1,8 +1,6 @@
 #include <Wire.h>
-#include <EEPROM.h>
 #include <Adafruit_SSD1306.h>
 #include <GyverButton.h> 
-#include <esp_sleep.h>
 #include "bitmaps.h"
 #include <SD.h>
 
