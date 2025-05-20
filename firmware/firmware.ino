@@ -5,6 +5,7 @@
 #include <BluetoothA2DPSource.h>
 #include "bitmaps.h"
 
+
 // hardware
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
