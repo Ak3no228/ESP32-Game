@@ -102,7 +102,6 @@ void updateMenu();
 void updateNotes();
 void loopMenu();
 void processMANIA();
-void precessGAMEPAD();
 
 int32_t get_data_frames(Frame *frame, int32_t frame_count) {
     if (!musicFile || !musicFile.available()) return 0;
@@ -114,8 +113,8 @@ int32_t get_data_frames(Frame *frame, int32_t frame_count) {
     int samplesRead = bytesRead / sizeof(int16_t);
     for (int i = 0; i < samplesRead; ++i) {
         int16_t sample = buffer[i];
-        frame[i].channel1 = sample; // левый
-        frame[i].channel2 = sample; // правый
+        frame[i].channel1 = sample;
+        frame[i].channel2 = sample;
     }
 
     if (!musicFile.available()) {
@@ -127,7 +126,6 @@ int32_t get_data_frames(Frame *frame, int32_t frame_count) {
 
 void musicTask(void *parameter) {
   while (true) {
-    // просто спим, BluetoothA2DP сам вызывает get_data_frames
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
@@ -147,12 +145,6 @@ void setup() {
   UP_BUTTON.setStepTimeout(1); 
   DOWN_BUTTON.setStepTimeout(1); 
   CENTRAL_BUTTON.setStepTimeout(1); 
-
-//  LEFT_BUTTON.setTickMode(AUTO);
-//  RIGHT_BUTTON.setTickMode(AUTO);
-//  UP_BUTTON.setTickMode(AUTO);
-//  DOWN_BUTTON.setTickMode(AUTO);
-//  CENTRAL_BUTTON.setTickMode(AUTO);
 
   Wire.begin();
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
@@ -218,9 +210,6 @@ void loop() {
   {
     if (menu_position == MANIA) {
       processMANIA();
-    }
-    else if (menu_position == GAMEPAD) {
-      precessGAMEPAD();
     }
     else isMenu = true;
   }
@@ -308,53 +297,6 @@ void setBright(uint16_t value)
 {
    display.ssd1306_command(SSD1306_SETCONTRAST);
    display.ssd1306_command(value);
-}
-
-
-void precessGAMEPAD(){
-  if (!game_pad)
-  {
-    clearButtons();
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setCursor(22, 29);
-    display.print("GAMEPAD");
-    display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_WHITE);
-    display.display();
-    game_pad = true; 
-  }
-  if (LEFT_BUTTON.isPress()) {
-    Serial.println("isPress LEFT_BUTTON");
-  }
-  if (RIGHT_BUTTON.isPress()) {
-    Serial.println("isPress RIGHT_BUTTON");
-//    isMenu = true;
-//    game_pad = false;
-  }
-  if (UP_BUTTON.isPress()) {
-    Serial.println("isPress UP_BUTTON");
-  }
-  if (DOWN_BUTTON.isPress()) {
-    Serial.println("isPress DOWN_BUTTON");
-  }
-  if (CENTRAL_BUTTON.isPress()) {
-    Serial.println("isPress CENTRAL_BUTTON");
-  }
-  if (LEFT_BUTTON.isRelease()) {
-    Serial.println("isRelease LEFT_BUTTON");
-  }
-  if (RIGHT_BUTTON.isRelease()) {
-    Serial.println("isRelease RIGHT_BUTTON");
-  }
-  if (UP_BUTTON.isRelease()) {
-    Serial.println("isRelease UP_BUTTON");
-  }
-  if (DOWN_BUTTON.isRelease()) {
-    Serial.println("isRelease DOWN_BUTTON");
-  }
-  if (CENTRAL_BUTTON.isRelease()) {
-    Serial.println("isRelease CENTRAL_BUTTON");
-  }
 }
 
 
