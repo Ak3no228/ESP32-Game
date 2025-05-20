@@ -1,9 +1,9 @@
 #include <Wire.h>
+#include <SD.h>
 #include <Adafruit_SSD1306.h>
 #include <GyverButton.h> 
-#include "bitmaps.h"
-#include <SD.h>
 #include <BluetoothA2DPSource.h>
+#include "bitmaps.h"
 
 // hardware
 #define SCREEN_WIDTH 128
