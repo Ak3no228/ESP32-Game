@@ -3,12 +3,12 @@
 #include <GyverButton.h> 
 #include "bitmaps.h"
 #include <SD.h>
-
+#include <BluetoothA2DPSource.h>
 
 // hardware
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define SCREEN_UPDATE_DELAY 17 //80fps
+#define SCREEN_UPDATE_DELAY 17 //60fps
 #define LEFT_BUTTON_PIN 26
 #define RIGHT_BUTTON_PIN 25
 #define UP_BUTTON_PIN 32
@@ -21,14 +21,13 @@
 
 // menu
 #define MANIA    0
-#define GAMEPAD  1
-#define BT_LINK  2
-#define SETTINGS 3
+#define BT_LINK  1
+#define SETTINGS 2
 
 
 
 // mania
-#define FRAME_TIME 12 //80fps 
+#define FRAME_TIME 16 //80fps 
 #define NOTE 1
 #define SLIDER 2
 #define NICE_HIT 2
@@ -47,7 +46,6 @@
 #define FALL_SPEED 0.14f
 #define PERFECT_HIT_RANGE 1.0
 #define NORMAL_HIT_RANGE  2.8
-#define SPEED_UP_ON_FRAME 0.0004
 #define MAX_MISSES 5
 
 
@@ -67,17 +65,27 @@ struct Note {
   bool draw;
 };
 
-const int max_note_count = 1000;
+const int max_note_count = 800;
 Note notes[max_note_count];
 int note_count = 0;
+
+
+//music
+File musicFile;
+const int WAV_HEADER_SIZE = 44;
+const int SAMPLE_RATE = 44100;
+const int BUFFER_SAMPLES = 256;
+//static int16_t buffer[BUFFER_SAMPLES * 2];
+static int16_t buffer[BUFFER_SAMPLES];
+bool music_started = false;
 
 
 // menu
 bool isMenu = true;
 int menu_position = 0;
-const char* MENU_ITEMS[] = {"MANIA", "GAMEPAD", "BT LINK", "SETTINGS"};
+const char* MENU_ITEMS[] = {"MANIA", "BT LINK", "SETTINGS"};
 const int NUM_MENU_ITEMS = sizeof(MENU_ITEMS) / sizeof(MENU_ITEMS[0]);
-const uint8_t MENU_ITEMS_OFFSETS[] = {34, 22, 22, 16};
+const uint8_t MENU_ITEMS_OFFSETS[] = {34, 22, 16};
 int percentage = -1;
 bool game_pad = false;
 
@@ -86,7 +94,7 @@ bool game_pad = false;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000, 400000);
 GButton LEFT_BUTTON(LEFT_BUTTON_PIN), RIGHT_BUTTON(RIGHT_BUTTON_PIN), UP_BUTTON(UP_BUTTON_PIN),
         DOWN_BUTTON(DOWN_BUTTON_PIN), CENTRAL_BUTTON(CENTRAL_BUTTON_PIN);
-        
+BluetoothA2DPSource a2dp_source;
 
 void setBright(uint16_t value);
 void updateBatery();
@@ -95,6 +103,35 @@ void updateNotes();
 void loopMenu();
 void processMANIA();
 void precessGAMEPAD();
+
+int32_t get_data_frames(Frame *frame, int32_t frame_count) {
+    if (!musicFile || !musicFile.available()) return 0;
+    if (!music_started) return 0;
+
+    size_t bytesToRead = frame_count * sizeof(int16_t);
+    size_t bytesRead = musicFile.read((uint8_t*)buffer, bytesToRead);
+
+    int samplesRead = bytesRead / sizeof(int16_t);
+    for (int i = 0; i < samplesRead; ++i) {
+        int16_t sample = buffer[i];
+        frame[i].channel1 = sample; // левый
+        frame[i].channel2 = sample; // правый
+    }
+
+    if (!musicFile.available()) {
+        musicFile.seek(WAV_HEADER_SIZE);
+    }
+
+    return samplesRead;
+}
+
+void musicTask(void *parameter) {
+  while (true) {
+    // просто спим, BluetoothA2DP сам вызывает get_data_frames
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  }
+}
+
 
 void setup() {
   Serial.begin(115200);
@@ -111,11 +148,11 @@ void setup() {
   DOWN_BUTTON.setStepTimeout(1); 
   CENTRAL_BUTTON.setStepTimeout(1); 
 
-  LEFT_BUTTON.setTickMode(AUTO);
-  RIGHT_BUTTON.setTickMode(AUTO);
-  UP_BUTTON.setTickMode(AUTO);
-  DOWN_BUTTON.setTickMode(AUTO);
-  CENTRAL_BUTTON.setTickMode(AUTO);
+//  LEFT_BUTTON.setTickMode(AUTO);
+//  RIGHT_BUTTON.setTickMode(AUTO);
+//  UP_BUTTON.setTickMode(AUTO);
+//  DOWN_BUTTON.setTickMode(AUTO);
+//  CENTRAL_BUTTON.setTickMode(AUTO);
 
   Wire.begin();
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
@@ -134,10 +171,48 @@ void setup() {
     while (1);
   }
   updateNotes();
+
+  File root = SD.open("/maps/THE_ORAL_CIGARETTES_Kyouran_Hey_Kids!!");
+  while (true) {
+        File entry = root.openNextFile();
+        if (!entry) break;
+        if (!entry.isDirectory()) {
+            String name = entry.name();
+            if (name.endsWith(".wav") || name.endsWith(".WAV")) {
+                musicFile = entry;
+                break;
+            }
+        }
+        entry.close();
+  }
+  musicFile.seek(WAV_HEADER_SIZE);
+
+  a2dp_source.set_auto_reconnect(false);
+  a2dp_source.set_data_callback_in_frames(get_data_frames);
+  a2dp_source.set_volume(20);
+  a2dp_source.start("realme Buds Air 5 Pro"); 
+
+  xTaskCreatePinnedToCore(
+    musicTask,
+    "Music Task",
+    4096,
+    NULL,
+    1,
+    NULL,
+    0
+  );
+
+}
+void tickButtons() {
+    LEFT_BUTTON.tick();
+    RIGHT_BUTTON.tick();
+    UP_BUTTON.tick();
+    DOWN_BUTTON.tick();
+    CENTRAL_BUTTON.tick();
 }
 
-
 void loop() {
+  tickButtons();
   if (isMenu) loopMenu();
   else
   {
@@ -293,13 +368,35 @@ void resetMania(bool win){
   else display.print("LOSE");
   display.setRotation(0);
   display.display();
-  while (!CENTRAL_BUTTON.isPress()) delay(1);
+  music_started = false;
+  while (!CENTRAL_BUTTON.state())
+  {
+    tickButtons();
+  }
   current_hitmark = -1;
   combo = 0;
   miss_count = 0; 
-  updateNotes();
+  //updateNotes();
   start_time = millis();
-  //isMenu = true;
+  clearButtons();
+  isMenu = true;
+  updateNotes();
+
+  File root = SD.open("/maps/THE_ORAL_CIGARETTES_Kyouran_Hey_Kids!!");
+  while (true) {
+        File entry = root.openNextFile();
+        if (!entry) break;
+        if (!entry.isDirectory()) {
+            String name = entry.name();
+            if (name.endsWith(".wav") || name.endsWith(".WAV")) {
+                musicFile = entry;
+                break;
+            }
+        }
+        entry.close();
+  }
+  musicFile.seek(WAV_HEADER_SIZE);
+  start_time = millis();
 }
 
 
@@ -351,27 +448,48 @@ void draw_hit_keys()
 
 void processMANIA()
 {
+  music_started = true;
   unsigned long current_time = millis() - start_time;
   if (millis() - lastFrameTime < FRAME_TIME) return;
 
   if (RIGHT_BUTTON.isClick())
   {
     isMenu = true;
+    music_started = false;
     current_hitmark = -1;
     combo = 0;
     miss_count = 0; 
     updateNotes();
     clearButtons();
+
+    File root = SD.open("/maps/THE_ORAL_CIGARETTES_Kyouran_Hey_Kids!!");
+    while (true) {
+        File entry = root.openNextFile();
+        if (!entry) break;
+        if (!entry.isDirectory()) {
+            String name = entry.name();
+            if (name.endsWith(".wav") || name.endsWith(".WAV")) {
+                musicFile = entry;
+                break;
+            }
+        }
+        entry.close();
+    }
+    musicFile.seek(WAV_HEADER_SIZE);
     return;
   }  
   display.clearDisplay();
   
   bool left_pressed = UP_BUTTON.isPress();
   bool right_pressed = DOWN_BUTTON.isPress();
+
+
+  bool some_nots = false;
   
   for (int i = 0; i < note_count; i++) {
      Note &n = notes[i];
-     if (n.draw==false) continue;
+     if (n.draw==false || n.type != 0) continue;
+     some_nots = true;
 
      float x_pos = (((long)n.time - (long)current_time) * fall_speed) + KEY_X_POSITION;
      if (x_pos >= -NOTE_RADIUS && x_pos <= 128+NOTE_RADIUS && n.type == 0) {
@@ -402,6 +520,11 @@ void processMANIA()
           process_hit(MISS_HIT);
       }
   }
+  if (some_nots == false)
+  {
+    resetMania(true);
+    return;
+  }
   draw_hit_keys();
   draw_hitmark();
   if (combo>5)
@@ -422,10 +545,10 @@ void updateNotes()
     String fullPath = "/maps/THE_ORAL_CIGARETTES_Kyouran_Hey_Kids!!/map.txt";
     File file = SD.open(fullPath.c_str());
     if (!file) {
-      Serial.println("Файл не найден: " + fullPath);
+      Serial.println("Файл не знайден: " + fullPath);
       return;
     }
-    while (file.available() && note_count <= 1000) {
+    while (file.available() && note_count <= 800) {
       String line = file.readStringUntil('\n');
       line.trim();
       if (line.length() == 0) continue;
